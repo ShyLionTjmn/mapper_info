@@ -4,7 +4,7 @@ package main
 
 redis data structure
 
-dev_list - HASH IP [pause|run]
+dev_list - HASH IP timestamp:[pause|run]
 ip_lock.Q.IP - redmutex key
 ip_last_result.Q.IP - ok:timestart:timedone | error:timestart:timeerror:error msg
 ip_data.Q.IP - queue Q HASH  someKey value otherKey.index value ...
@@ -76,7 +76,9 @@ func main() {
   qstr_regex := regexp.MustCompile(`^(\d+):(\d+):([^:]+):(.*)$`)
   run_regex := regexp.MustCompile(`^(\d+):(\d+)$`)
 
-  keys_regex := regexp.MustCompile(`^(\d+):(\d+):(one|table):(int|uns|oid|str|hex)$`)
+  dev_list_regex := regexp.MustCompile(`^(\d+):(.+)$`)
+
+  keys_regex := regexp.MustCompile(`^(\d+):(\d+):(one|table):(int|uns|oid|str|hex):.*$`)
 
   red, err = redis.Dial("unix", "/tmp/redis.sock")
   if err != nil { return }
@@ -187,9 +189,13 @@ func main() {
     var run_dev_quit int
     var run_dev_stale int
 
-    for dev_ip, dev_run := range dev_list {
+    for dev_ip, dev_ts_run := range dev_list {
       ip_valid := ip_regex.MatchString(dev_ip)
-      if ip_valid {
+      dev_list_match := dev_list_regex.FindStringSubmatch(dev_ts_run)
+      if ip_valid && dev_list_match != nil {
+
+        dev_run := dev_list_match[2]
+
         if dev_run == "run" {
           run_devices++
           var ip_queues map[string]string
@@ -290,7 +296,7 @@ func main() {
         }
       } else {
         invalid_devices++
-        fmt.Println("Invalid:", dev_ip, dev_run)
+        fmt.Println("Invalid:", dev_ip, dev_ts_run)
       }
     }
     fmt.Printf("Total devs in dev_list: %d\n", len(dev_list))
@@ -330,10 +336,12 @@ func main() {
           return
         }
         for key, key_str := range ip_keys {
-          if key == "_count" { continue }
+          switch(key) {
+          case "_count", "_added", "_time" : continue
+          }
           m := keys_regex.FindStringSubmatch(key_str)
           if m == nil {
-            err = errors.New("Key ip_keys_key is invalid")
+            err = errors.New("Key ip_keys_key is invalid: "+key_str)
             return
           }
           var key_start_ms, key_stop_ms int64
